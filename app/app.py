@@ -247,11 +247,11 @@ def get_forecast_data():
         total_products = len(df['Product'].unique())
         avg_order = round(float(df['Price (PKR)'].mean()), 2)
         
-        # Calculate monthly growth
-        df['Month'] = df['Order Date'].dt.to_period('M')
-        monthly_sales = df.groupby('Month')['Total Sales (PKR)'].sum()
+        # Calculate monthly growth (Fixed Period handling)
+        df['YearMonth'] = df['Order Date'].dt.to_period('M')
+        monthly_sales = df.groupby('YearMonth')['Total Sales (PKR)'].sum()
         monthly_growth = monthly_sales.pct_change() * 100
-        avg_monthly_growth = round(monthly_growth.mean(), 1)
+        avg_monthly_growth = round(float(monthly_growth.mean()), 1)
 
         # ============ Category Distribution ============
         category_sales = df.groupby('Category')['Total Sales (PKR)'].sum().round(2)
@@ -260,14 +260,16 @@ def get_forecast_data():
             for cat, sales in category_sales.items()
         ]
 
-        # ============ Monthly Sales Trend ============
-        monthly_trend = df.groupby(['Year', 'Month'])['Total Sales (PKR)'].sum().reset_index()
-        monthly_trend['date'] = monthly_trend.apply(
-            lambda x: f"{int(x['Month'])}", axis=1
-        )
+        # ============ Monthly Sales Trend (Fixed Period handling) ============
+        monthly_trend = (df.groupby([df['Order Date'].dt.year, df['Order Date'].dt.month])
+                        ['Total Sales (PKR)']
+                        .sum()
+                        .reset_index())
+        monthly_trend.columns = ['Year', 'Month', 'Total Sales (PKR)']
+        
         monthly_trend_data = [
             {
-                "date": row['date'],
+                "date": str(row['Month']),  # Convert month to string
                 "sales": float(row['Total Sales (PKR)'])
             }
             for _, row in monthly_trend.iterrows()
