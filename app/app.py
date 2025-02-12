@@ -42,16 +42,31 @@ def load_and_preprocess_data():
         df = pd.read_csv('dropandshop.csv')
         
         # Convert date and extract features
-        df['Order Date'] = pd.to_datetime(df['Order Date'])
-        df['Month'] = df['Order Date'].dt.month
-        df['Year'] = df['Order Date'].dt.year
+        if 'Order Date' in df.columns:
+            df['Order Date'] = pd.to_datetime(df['Order Date'])
+            # Extract month and year without creating new columns if they exist
+            if 'Month' not in df.columns:
+                df['Month'] = df['Order Date'].dt.month
+            if 'Year' not in df.columns:
+                df['Year'] = df['Order Date'].dt.year
         
-        # Encode categorical variables
-        category_encoder = LabelEncoder()
-        product_encoder = LabelEncoder()
+        # Ensure required columns exist
+        required_columns = [
+            'Product', 'Category', 'Price (PKR)', 
+            'Quantity Sold', 'Total Sales (PKR)'
+        ]
+        for col in required_columns:
+            if col not in df.columns:
+                raise Exception(f"Missing required column: {col}")
         
-        df['Category_encoded'] = category_encoder.fit_transform(df['Category'])
-        df['Product_encoded'] = product_encoder.fit_transform(df['Product'])
+        # Encode categorical variables only if not already encoded
+        if 'Category_encoded' not in df.columns:
+            category_encoder = LabelEncoder()
+            df['Category_encoded'] = category_encoder.fit_transform(df['Category'])
+        
+        if 'Product_encoded' not in df.columns:
+            product_encoder = LabelEncoder()
+            df['Product_encoded'] = product_encoder.fit_transform(df['Product'])
         
         # Cache the preprocessed dataframe
         _cached_df = df
@@ -228,7 +243,10 @@ def get_stats():
             'total_quantity_sold': int(df['Quantity Sold'].sum())
         }
         
-        return jsonify(stats)
+        return jsonify({
+            'status': 'success',
+            'data': stats
+        })
     except Exception as e:
         return jsonify({
             'status': 'error',
@@ -248,28 +266,29 @@ def get_forecast_data():
         avg_order = round(float(df['Price (PKR)'].mean()), 2)
         
         # Calculate monthly growth (Fixed Period handling)
-        df['YearMonth'] = df['Order Date'].dt.to_period('M')
+        # Create a temporary column for grouping
+        df['YearMonth'] = pd.to_datetime(df['Order Date']).dt.to_period('M')
         monthly_sales = df.groupby('YearMonth')['Total Sales (PKR)'].sum()
         monthly_growth = monthly_sales.pct_change() * 100
-        avg_monthly_growth = round(float(monthly_growth.mean()), 1)
+        avg_monthly_growth = round(float(monthly_growth.mean() if not pd.isna(monthly_growth.mean()) else 0), 1)
 
         # ============ Category Distribution ============
         category_sales = df.groupby('Category')['Total Sales (PKR)'].sum().round(2)
         category_distribution = [
-            {"name": cat, "value": float(sales)} 
+            {"name": str(cat), "value": float(sales)} 
             for cat, sales in category_sales.items()
         ]
 
-        # ============ Monthly Sales Trend (Fixed Period handling) ============
-        monthly_trend = (df.groupby([df['Order Date'].dt.year, df['Order Date'].dt.month])
-                        ['Total Sales (PKR)']
-                        .sum()
-                        .reset_index())
-        monthly_trend.columns = ['Year', 'Month', 'Total Sales (PKR)']
+        # ============ Monthly Sales Trend ============
+        monthly_trend = (df.groupby([
+            pd.to_datetime(df['Order Date']).dt.year,
+            pd.to_datetime(df['Order Date']).dt.month
+        ])['Total Sales (PKR)'].sum().reset_index())
         
+        monthly_trend.columns = ['Year', 'Month', 'Total Sales (PKR)']
         monthly_trend_data = [
             {
-                "date": str(row['Month']),  # Convert month to string
+                "date": str(int(row['Month'])),
                 "sales": float(row['Total Sales (PKR)'])
             }
             for _, row in monthly_trend.iterrows()
@@ -285,7 +304,7 @@ def get_forecast_data():
         top_products = top_products.nlargest(13, 'Total Sales (PKR)')
         top_products_data = [
             {
-                "product": row['Product'],
+                "product": str(row['Product']),
                 "quantity": int(row['Quantity Sold']),
                 "price": float(row['Price (PKR)']),
                 "sales": float(row['Total Sales (PKR)'])
